@@ -1,0 +1,1129 @@
+local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
+
+local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
+local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
+local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
+
+local Players = game:GetService("Players")
+local UserInput = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local CollectionService = game:GetService("CollectionService")
+local TweenService = game:GetService("TweenService")
+
+local LP = Players.LocalPlayer
+local St = {}
+local flySpeed = 80
+local espPlayersMasterEnabled = false
+local espMobsMasterEnabled = false
+local espNPCsMasterEnabled = false
+
+-- Agility spoofer variables
+local originalAgilityValue = nil
+local agilityConnection = nil
+-- Noclip variables
+local noclipConnection = nil
+-- Realm teleporter variables
+local etreanTeleportConnection = nil
+local isTeleportingToEtrean = false
+local easternTeleportConnection = nil
+local isTeleportingToEastern = false
+
+local espPlayers = {}
+local espMobs = {}
+local espNPCs = {}
+
+local function isMob(model)
+    return model.Name:sub(1, 1) == "."
+end
+
+local function startFly()
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    if St.flyBV then St.flyBV:Destroy() end
+    St.flyBV = Instance.new("BodyVelocity")
+    St.flyBV.Name = "FlyBV"
+    St.flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    St.flyBV.Velocity = Vector3.zero
+    St.flyBV.Parent = hrp
+    CollectionService:AddTag(St.flyBV, "AllowedBM")
+end
+
+local function stopFly()
+    if St.flyBV then
+        St.flyBV:Destroy()
+        St.flyBV = nil
+    end
+end
+
+-- Agility spoofer functions
+local function enableAgilitySpoofer()
+    local live = workspace:FindFirstChild("Live")
+    if not live then return end
+    
+    local playerModel = live:FindFirstChild(LP.Name)
+    if not playerModel then return end
+    
+    local passiveAgility = playerModel:FindFirstChild("PassiveAgility")
+    if not passiveAgility then return end
+    
+    originalAgilityValue = passiveAgility.Value
+    passiveAgility.Value = Options.AgilitySlider.Value
+    
+    if agilityConnection then agilityConnection:Disconnect() end
+    
+    agilityConnection = RunService.Heartbeat:Connect(function()
+        local currentLive = workspace:FindFirstChild("Live")
+        if currentLive then
+            local currentPlayerModel = currentLive:FindFirstChild(LP.Name)
+            if currentPlayerModel then
+                local currentPassiveAgility = currentPlayerModel:FindFirstChild("PassiveAgility")
+                if currentPassiveAgility then
+                    currentPassiveAgility.Value = Options.AgilitySlider.Value
+                end
+            end
+        end
+    end)
+end
+
+local function disableAgilitySpoofer()
+    if agilityConnection then
+        agilityConnection:Disconnect()
+        agilityConnection = nil
+    end
+    
+    local live = workspace:FindFirstChild("Live")
+    if live and originalAgilityValue then
+        local playerModel = live:FindFirstChild(LP.Name)
+        if playerModel then
+            local passiveAgility = playerModel:FindFirstChild("PassiveAgility")
+            if passiveAgility then
+                passiveAgility.Value = originalAgilityValue
+            end
+        end
+    end
+end
+
+-- Noclip functions
+local function enableNoclip()
+    if noclipConnection then return end
+    
+    noclipConnection = RunService.Stepped:Connect(function()
+        local char = LP.Character
+        if char then
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end)
+end
+
+local function disableNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+end
+
+-- Improved teleport function with multiple methods
+local function teleportToRealm(realmName, teleportConnectionVar, isTeleportingVar)
+    if isTeleportingVar then
+        if teleportConnectionVar then
+            teleportConnectionVar:Disconnect()
+            teleportConnectionVar = nil
+        end
+        isTeleportingVar = false
+        return false
+    end
+    
+    isTeleportingVar = true
+    
+    local function findRealmTeleporter()
+        local teleporter = workspace:FindFirstChild("RealmTeleporter")
+        if teleporter then return teleporter end
+        
+        for _, child in pairs(workspace:GetChildren()) do
+            if child.Name and string.find(string.lower(child.Name), string.lower(realmName)) then
+                return child
+            end
+        end
+        
+        return nil
+    end
+    
+    local function teleportViaCFrame(teleporter)
+        local char = LP.Character
+        if not char then return false end
+        
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return false end
+        
+        hrp.CFrame = teleporter.CFrame
+        return true
+    end
+    
+    local function teleportViaTween(teleporter)
+        local char = LP.Character
+        if not char then return false end
+        
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return false end
+        
+        local tweenInfo = TweenInfo.new(0.1, Enum.EasingStyle.Linear)
+        local tween = TweenService:Create(hrp, tweenInfo, {CFrame = teleporter.CFrame})
+        tween:Play()
+        return true
+    end
+    
+    local teleporter = findRealmTeleporter()
+    if teleporter then
+        print("Found teleporter:", teleporter.Name)
+        teleportViaCFrame(teleporter)
+        task.wait(0.1)
+        teleportViaTween(teleporter)
+    else
+        warn("Could not find RealmTeleporter for:", realmName)
+        print("Available workspace children:")
+        for _, child in pairs(workspace:GetChildren()) do
+            print(" -", child.Name, child.ClassName)
+        end
+    end
+    
+    local connection
+    connection = RunService.Heartbeat:Connect(function()
+        if not isTeleportingVar then
+            if connection then
+                connection:Disconnect()
+            end
+            return
+        end
+        
+        local currentTeleporter = findRealmTeleporter()
+        if currentTeleporter then
+            teleportViaCFrame(currentTeleporter)
+        end
+    end)
+    
+    task.delay(10, function()
+        if isTeleportingVar then
+            isTeleportingVar = false
+            if connection then
+                connection:Disconnect()
+            end
+            print("Stopped teleporting to", realmName, "after 10 seconds")
+        end
+    end)
+    
+    return true
+end
+
+local function teleportToEtreanLuminant()
+    teleportToRealm("Etrean", etreanTeleportConnection, isTeleportingToEtrean)
+end
+
+local function teleportToEasternLuminant()
+    teleportToRealm("Eastern", easternTeleportConnection, isTeleportingToEastern)
+end
+
+local function hpColor(pct)
+    if pct > 0.5 then
+        return Color3.fromRGB(math.floor(255 * (1 - pct) * 2), 255, 0)
+    else
+        return Color3.fromRGB(255, math.floor(255 * pct * 2), 0)
+    end
+end
+
+local function createEntry(storage, model, nameColor, distColor, fillColor, hasHP)
+    if storage[model] then return end
+
+    local nameLabel = Drawing.new("Text")
+    nameLabel.Visible = false
+    nameLabel.Text = model.Name
+    nameLabel.Size = 14
+    nameLabel.Center = true
+    nameLabel.Outline = true
+    nameLabel.OutlineColor = Color3.fromRGB(0, 0, 0)
+    nameLabel.Color = nameColor
+    nameLabel.Font = Drawing.Fonts.UI
+
+    local distLabel = Drawing.new("Text")
+    distLabel.Visible = false
+    distLabel.Text = "0m"
+    distLabel.Size = 12
+    distLabel.Center = true
+    distLabel.Outline = true
+    distLabel.OutlineColor = Color3.fromRGB(0, 0, 0)
+    distLabel.Color = distColor
+    distLabel.Font = Drawing.Fonts.UI
+
+    local hpLabel = nil
+    if hasHP then
+        hpLabel = Drawing.new("Text")
+        hpLabel.Visible = false
+        hpLabel.Text = "100%"
+        hpLabel.Size = 12
+        hpLabel.Center = true
+        hpLabel.Outline = true
+        hpLabel.OutlineColor = Color3.fromRGB(0, 0, 0)
+        hpLabel.Color = Color3.fromRGB(0, 255, 0)
+        hpLabel.Font = Drawing.Fonts.UI
+    end
+
+    local highlight = Instance.new("Highlight")
+    highlight.FillColor = fillColor
+    highlight.OutlineColor = fillColor
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Enabled = false
+    highlight.Parent = model
+
+    storage[model] = { name = nameLabel, dist = distLabel, hp = hpLabel, highlight = highlight, hasHP = hasHP }
+end
+
+local function removeEntry(storage, model)
+    if storage[model] then
+        storage[model].name:Remove()
+        storage[model].dist:Remove()
+        if storage[model].hp then
+            storage[model].hp:Remove()
+        end
+        if storage[model].highlight and storage[model].highlight.Parent then
+            storage[model].highlight:Destroy()
+        end
+        storage[model] = nil
+    end
+end
+
+local function updateLabels(storage, toggleKey, distToggleKey, hpToggleKey, highlightToggleKey, nameColorKey, distColorKey, fillColorKey, sizeKey, fillTransKey, maxDistKey, masterEnabled)
+    if not masterEnabled then
+        return
+    end
+    
+    local camera = workspace.CurrentCamera
+    local lpChar = LP.Character
+    local lpHRP = lpChar and lpChar:FindFirstChild("HumanoidRootPart")
+    
+    local maxDistance = Options[maxDistKey] and Options[maxDistKey].Value or math.huge
+
+    for model, entry in pairs(storage) do
+        if not model.Parent then
+            removeEntry(storage, model)
+            continue
+        end
+
+        local showName      = Toggles[toggleKey] and Toggles[toggleKey].Value or false
+        local showDist      = Toggles[distToggleKey] and Toggles[distToggleKey].Value or false
+        local showHP        = (entry.hasHP and hpToggleKey and Toggles[hpToggleKey] and Toggles[hpToggleKey].Value) or false
+        local showHighlight = Toggles[highlightToggleKey] and Toggles[highlightToggleKey].Value or false
+
+        local hrp = model:FindFirstChild("HumanoidRootPart")
+        local hum = entry.hasHP and model:FindFirstChildOfClass("Humanoid") or nil
+
+        if not hrp then
+            entry.name.Visible = false
+            entry.dist.Visible = false
+            if entry.hp then entry.hp.Visible = false end
+            entry.highlight.Enabled = false
+            continue
+        end
+
+        if lpChar and model == lpChar then
+            entry.name.Visible = false
+            entry.dist.Visible = false
+            if entry.hp then entry.hp.Visible = false end
+            entry.highlight.Enabled = false
+            continue
+        end
+
+        -- For NPCs, don't require Humanoid
+        if entry.hasHP and not hum then
+            entry.name.Visible = false
+            entry.dist.Visible = false
+            if entry.hp then entry.hp.Visible = false end
+            entry.highlight.Enabled = false
+            continue
+        end
+
+        local distanceTooFar = false
+        if lpHRP then
+            local distance = (hrp.Position - lpHRP.Position).Magnitude
+            distanceTooFar = distance > maxDistance
+        end
+
+        if distanceTooFar then
+            entry.name.Visible = false
+            entry.dist.Visible = false
+            if entry.hp then entry.hp.Visible = false end
+            entry.highlight.Enabled = false
+            continue
+        end
+
+        entry.highlight.Enabled = showHighlight
+        if showHighlight then
+            local col = Options[fillColorKey].Value
+            entry.highlight.FillColor = col
+            entry.highlight.OutlineColor = col
+            entry.highlight.FillTransparency = Options[fillTransKey].Value
+        end
+
+        local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, 3.2, 0))
+        if not onScreen then
+            entry.name.Visible = false
+            entry.dist.Visible = false
+            if entry.hp then entry.hp.Visible = false end
+            continue
+        end
+
+        local textSize = Options[sizeKey].Value
+        local lineGap = textSize + 2
+        local currentY = screenPos.Y
+
+        entry.name.Position = Vector2.new(screenPos.X, currentY)
+        entry.name.Color = Options[nameColorKey].Value
+        entry.name.Size = textSize
+        entry.name.Visible = showName
+        if showName then currentY += lineGap end
+
+        local dist = lpHRP and math.floor((hrp.Position - lpHRP.Position).Magnitude) or 0
+        entry.dist.Text = dist .. "m"
+        entry.dist.Color = Options[distColorKey].Value
+        entry.dist.Size = textSize - 2
+        entry.dist.Position = Vector2.new(screenPos.X, currentY)
+        entry.dist.Visible = showDist
+        if showDist then currentY += lineGap end
+
+        if entry.hp and hum then
+            local pct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+            entry.hp.Text = math.floor(pct * 100) .. "%"
+            entry.hp.Color = hpColor(pct)
+            entry.hp.Size = textSize - 2
+            entry.hp.Position = Vector2.new(screenPos.X, currentY)
+            entry.hp.Visible = showHP
+        end
+    end
+end
+
+local function forceHideESP()
+    if not espPlayersMasterEnabled then
+        for model, entry in pairs(espPlayers) do
+            if entry then
+                entry.name.Visible = false
+                entry.dist.Visible = false
+                if entry.hp then entry.hp.Visible = false end
+                if entry.highlight then
+                    entry.highlight.Enabled = false
+                end
+            end
+        end
+    end
+    
+    if not espMobsMasterEnabled then
+        for model, entry in pairs(espMobs) do
+            if entry then
+                entry.name.Visible = false
+                entry.dist.Visible = false
+                if entry.hp then entry.hp.Visible = false end
+                if entry.highlight then
+                    entry.highlight.Enabled = false
+                end
+            end
+        end
+    end
+    
+    if not espNPCsMasterEnabled then
+        for model, entry in pairs(espNPCs) do
+            if entry then
+                entry.name.Visible = false
+                entry.dist.Visible = false
+                if entry.hp then entry.hp.Visible = false end
+                if entry.highlight then
+                    entry.highlight.Enabled = false
+                end
+            end
+        end
+    end
+end
+
+local function updateAllESP()
+    updateLabels(espPlayers,
+        'ESPToggle', 'ESPDistToggle', 'ESPHPToggle', 'ESPHighlightToggle',
+        'ESPColor', 'ESPDistColor', 'ESPFillColor',
+        'ESPSize', 'ESPFillTrans', 'ESPMaxDistance',
+        espPlayersMasterEnabled)
+
+    updateLabels(espMobs,
+        'MobESPToggle', 'MobESPDistToggle', 'MobESPHPToggle', 'MobESPHighlightToggle',
+        'MobESPColor', 'MobESPDistColor', 'MobESPFillColor',
+        'MobESPSize', 'MobESPFillTrans', 'MobESPMaxDistance',
+        espMobsMasterEnabled)
+        
+    updateLabels(espNPCs,
+        'NPCEPToggle', 'NPCEspDistToggle', nil, 'NPCEspHighlightToggle',
+        'NPCEspColor', 'NPCEspDistColor', 'NPCEspFillColor',
+        'NPCEspSize', 'NPCEspFillTrans', 'NPCEspMaxDistance',
+        espNPCsMasterEnabled)
+end
+
+-- Watch for NPCs in Workspace.NPCs
+local function watchNPCs()
+    local npcContainer = workspace:FindFirstChild("NPCs")
+    if not npcContainer then
+        -- Keep waiting for NPCs folder to appear
+        local npcAddedConnection
+        npcAddedConnection = workspace.ChildAdded:Connect(function(child)
+            if child.Name == "NPCs" then
+                npcContainer = child
+                npcAddedConnection:Disconnect()
+                
+                -- Add existing NPCs (NPCs don't have HP)
+                for _, npc in pairs(npcContainer:GetChildren()) do
+                    if npc:IsA("Model") then
+                        createEntry(espNPCs, npc,
+                            Color3.fromRGB(160, 32, 240), -- Purple color for name
+                            Color3.fromRGB(200, 100, 255), -- Light purple for distance
+                            Color3.fromRGB(128, 0, 255), -- Dark purple for highlight
+                            false) -- No HP
+                    end
+                end
+                
+                -- Watch for new NPCs
+                npcContainer.ChildAdded:Connect(function(npc)
+                    if npc:IsA("Model") then
+                        createEntry(espNPCs, npc,
+                            Color3.fromRGB(160, 32, 240),
+                            Color3.fromRGB(200, 100, 255),
+                            Color3.fromRGB(128, 0, 255),
+                            false) -- No HP
+                    end
+                end)
+                
+                -- Watch for removed NPCs
+                npcContainer.ChildRemoved:Connect(function(npc)
+                    removeEntry(espNPCs, npc)
+                end)
+            end
+        end)
+        
+        -- Timeout after 30 seconds
+        task.delay(30, function()
+            if npcAddedConnection then
+                npcAddedConnection:Disconnect()
+            end
+        end)
+        return
+    end
+    
+    -- Add existing NPCs (NPCs don't have HP)
+    for _, npc in pairs(npcContainer:GetChildren()) do
+        if npc:IsA("Model") then
+            createEntry(espNPCs, npc,
+                Color3.fromRGB(160, 32, 240),
+                Color3.fromRGB(200, 100, 255),
+                Color3.fromRGB(128, 0, 255),
+                false) -- No HP
+        end
+    end
+    
+    -- Watch for new NPCs
+    npcContainer.ChildAdded:Connect(function(npc)
+        if npc:IsA("Model") then
+            createEntry(espNPCs, npc,
+                Color3.fromRGB(160, 32, 240),
+                Color3.fromRGB(200, 100, 255),
+                Color3.fromRGB(128, 0, 255),
+                false) -- No HP
+        end
+    end)
+    
+    -- Watch for removed NPCs
+    npcContainer.ChildRemoved:Connect(function(npc)
+        removeEntry(espNPCs, npc)
+    end)
+end
+
+local function watchLive()
+    local live = workspace:WaitForChild("Live", 10)
+    if not live then return end
+
+    for _, model in ipairs(live:GetChildren()) do
+        if not model:IsA("Model") then continue end
+        if isMob(model) then
+            createEntry(espMobs, model,
+                Color3.fromRGB(255, 100, 100), Color3.fromRGB(255, 180, 180),
+                Color3.fromRGB(255, 50, 50), true) -- Mobs have HP
+        else
+            createEntry(espPlayers, model,
+                Color3.fromRGB(255, 255, 255), Color3.fromRGB(180, 220, 255),
+                Color3.fromRGB(50, 100, 255), true) -- Players have HP
+        end
+    end
+
+    live.ChildAdded:Connect(function(child)
+        if not child:IsA("Model") then return end
+        if isMob(child) then
+            createEntry(espMobs, child,
+                Color3.fromRGB(255, 100, 100), Color3.fromRGB(255, 180, 180),
+                Color3.fromRGB(255, 50, 50), true)
+        else
+            createEntry(espPlayers, child,
+                Color3.fromRGB(255, 255, 255), Color3.fromRGB(180, 220, 255),
+                Color3.fromRGB(50, 100, 255), true)
+        end
+    end)
+
+    live.ChildRemoved:Connect(function(child)
+        removeEntry(espPlayers, child)
+        removeEntry(espMobs, child)
+    end)
+end
+
+task.spawn(watchLive)
+task.spawn(watchNPCs)
+
+-- UI
+local Window = Library:CreateWindow({
+    Title = 'Meow :3',
+    Center = true,
+    AutoShow = true,
+    TabPadding = 8,
+    MenuFadeTime = 0.2
+})
+
+local Tabs = {
+    Main = Window:AddTab('Main'),
+    ESP = Window:AddTab('ESP'),
+    Combat = Window:AddTab('Combat'),
+    ['UI Settings'] = Window:AddTab('UI Settings'),
+}
+
+local LeftGroupBox     = Tabs.Main:AddLeftGroupbox('Utilities')
+local MovementGroupBox = Tabs.Main:AddRightGroupbox('Movement')
+
+-- ESP Groupboxes - Each entity type now has its own complete section
+local PlayerESPGroup = Tabs.ESP:AddLeftGroupbox('Players')
+local MobESPGroup    = Tabs.ESP:AddRightGroupbox('Mobs')
+local NPCEspGroup    = Tabs.ESP:AddLeftGroupbox('NPCs')
+
+-- ============ PLAYERS ESP SECTION ============
+-- Master Control
+PlayerESPGroup:AddToggle('ESPPlayerMasterToggle', {
+    Text = 'Master ESP (Players)',
+    Default = false,
+    Tooltip = 'Master toggle for ALL Player ESP features. Individual settings only work when this is ON',
+    Callback = function(Value)
+        espPlayersMasterEnabled = Value
+        forceHideESP()
+    end
+})
+
+PlayerESPGroup:AddLabel('Players Master Keybind'):AddKeyPicker('ESPPlayerMasterKeybind', {
+    Default = '',
+    SyncToggleState = true,
+    Mode = 'Toggle',
+    Text = 'Toggle Players ESP',
+    NoUI = false,
+})
+
+Options.ESPPlayerMasterKeybind:OnClick(function()
+    Toggles.ESPPlayerMasterToggle:SetValue(not Toggles.ESPPlayerMasterToggle.Value)
+end)
+
+PlayerESPGroup:AddDivider()
+
+-- Individual Settings
+PlayerESPGroup:AddToggle('ESPToggle', {
+    Text = 'Name ESP',
+    Default = false,
+    Tooltip = 'Show names above player characters (Only works if Master ESP is ON)',
+})
+
+PlayerESPGroup:AddToggle('ESPDistToggle', {
+    Text = 'Distance',
+    Default = false,
+    Tooltip = 'Show distance below player names (Only works if Master ESP is ON)',
+})
+
+PlayerESPGroup:AddToggle('ESPHPToggle', {
+    Text = 'HP %',
+    Default = false,
+    Tooltip = 'Show health percentage (Only works if Master ESP is ON)',
+})
+
+PlayerESPGroup:AddToggle('ESPHighlightToggle', {
+    Text = 'Highlight',
+    Default = false,
+    Tooltip = 'Highlight player bodies through walls (Only works if Master ESP is ON)',
+})
+
+PlayerESPGroup:AddDivider()
+
+PlayerESPGroup:AddLabel('Name Color'):AddColorPicker('ESPColor', {
+    Default = Color3.fromRGB(255, 255, 255),
+    Title = 'Player Name Color',
+})
+
+PlayerESPGroup:AddLabel('Distance Color'):AddColorPicker('ESPDistColor', {
+    Default = Color3.fromRGB(180, 220, 255),
+    Title = 'Player Distance Color',
+})
+
+PlayerESPGroup:AddLabel('Highlight Color'):AddColorPicker('ESPFillColor', {
+    Default = Color3.fromRGB(50, 100, 255),
+    Title = 'Player Highlight Color',
+})
+
+PlayerESPGroup:AddSlider('ESPFillTrans', {
+    Text = 'Fill Transparency',
+    Default = 0.5,
+    Min = 0,
+    Max = 1,
+    Rounding = 1,
+    Compact = false,
+})
+
+PlayerESPGroup:AddSlider('ESPSize', {
+    Text = 'Text Size',
+    Default = 14,
+    Min = 8,
+    Max = 24,
+    Rounding = 0,
+    Compact = false,
+})
+
+PlayerESPGroup:AddDivider()
+PlayerESPGroup:AddSlider('ESPMaxDistance', {
+    Text = 'Max Distance',
+    Default = 1000,
+    Min = 50,
+    Max = 5000,
+    Rounding = 0,
+    Compact = false,
+    Tooltip = 'ESP only shows players within this distance'
+})
+
+-- ============ MOBS ESP SECTION ============
+-- Master Control
+MobESPGroup:AddToggle('ESPMobMasterToggle', {
+    Text = 'Master ESP (Mobs)',
+    Default = false,
+    Tooltip = 'Master toggle for ALL Mob ESP features. Individual settings only work when this is ON',
+    Callback = function(Value)
+        espMobsMasterEnabled = Value
+        forceHideESP()
+    end
+})
+
+MobESPGroup:AddLabel('Mobs Master Keybind'):AddKeyPicker('ESPMobMasterKeybind', {
+    Default = '',
+    SyncToggleState = true,
+    Mode = 'Toggle',
+    Text = 'Toggle Mobs ESP',
+    NoUI = false,
+})
+
+Options.ESPMobMasterKeybind:OnClick(function()
+    Toggles.ESPMobMasterToggle:SetValue(not Toggles.ESPMobMasterToggle.Value)
+end)
+
+MobESPGroup:AddDivider()
+
+-- Individual Settings
+MobESPGroup:AddToggle('MobESPToggle', {
+    Text = 'Name ESP',
+    Default = false,
+    Tooltip = 'Show names above mobs (Only works if Master ESP is ON)',
+})
+
+MobESPGroup:AddToggle('MobESPDistToggle', {
+    Text = 'Distance',
+    Default = false,
+    Tooltip = 'Show distance below mob names (Only works if Master ESP is ON)',
+})
+
+MobESPGroup:AddToggle('MobESPHPToggle', {
+    Text = 'HP %',
+    Default = false,
+    Tooltip = 'Show health percentage (Only works if Master ESP is ON)',
+})
+
+MobESPGroup:AddToggle('MobESPHighlightToggle', {
+    Text = 'Highlight',
+    Default = false,
+    Tooltip = 'Highlight mob bodies through walls (Only works if Master ESP is ON)',
+})
+
+MobESPGroup:AddDivider()
+
+MobESPGroup:AddLabel('Name Color'):AddColorPicker('MobESPColor', {
+    Default = Color3.fromRGB(255, 100, 100),
+    Title = 'Mob Name Color',
+})
+
+MobESPGroup:AddLabel('Distance Color'):AddColorPicker('MobESPDistColor', {
+    Default = Color3.fromRGB(255, 180, 180),
+    Title = 'Mob Distance Color',
+})
+
+MobESPGroup:AddLabel('Highlight Color'):AddColorPicker('MobESPFillColor', {
+    Default = Color3.fromRGB(255, 50, 50),
+    Title = 'Mob Highlight Color',
+})
+
+MobESPGroup:AddSlider('MobESPFillTrans', {
+    Text = 'Fill Transparency',
+    Default = 0.5,
+    Min = 0,
+    Max = 1,
+    Rounding = 1,
+    Compact = false,
+})
+
+MobESPGroup:AddSlider('MobESPSize', {
+    Text = 'Text Size',
+    Default = 14,
+    Min = 8,
+    Max = 24,
+    Rounding = 0,
+    Compact = false,
+})
+
+MobESPGroup:AddDivider()
+MobESPGroup:AddSlider('MobESPMaxDistance', {
+    Text = 'Max Distance',
+    Default = 1000,
+    Min = 50,
+    Max = 5000,
+    Rounding = 0,
+    Compact = false,
+    Tooltip = 'ESP only shows mobs within this distance'
+})
+
+-- ============ NPCS ESP SECTION ============
+-- Master Control
+NPCEspGroup:AddToggle('ESPNPCMasterToggle', {
+    Text = 'Master ESP (NPCs)',
+    Default = false,
+    Tooltip = 'Master toggle for ALL NPC ESP features. Individual settings only work when this is ON',
+    Callback = function(Value)
+        espNPCsMasterEnabled = Value
+        forceHideESP()
+    end
+})
+
+NPCEspGroup:AddLabel('NPCs Master Keybind'):AddKeyPicker('ESPNPCMasterKeybind', {
+    Default = '',
+    SyncToggleState = true,
+    Mode = 'Toggle',
+    Text = 'Toggle NPCs ESP',
+    NoUI = false,
+})
+
+Options.ESPNPCMasterKeybind:OnClick(function()
+    Toggles.ESPNPCMasterToggle:SetValue(not Toggles.ESPNPCMasterToggle.Value)
+end)
+
+NPCEspGroup:AddDivider()
+
+-- Individual Settings (No HP for NPCs)
+NPCEspGroup:AddToggle('NPCEPToggle', {
+    Text = 'Name ESP',
+    Default = false,
+    Tooltip = 'Show names above NPCs (Only works if Master ESP is ON)',
+})
+
+NPCEspGroup:AddToggle('NPCEspDistToggle', {
+    Text = 'Distance',
+    Default = false,
+    Tooltip = 'Show distance below NPC names (Only works if Master ESP is ON)',
+})
+
+NPCEspGroup:AddToggle('NPCEspHighlightToggle', {
+    Text = 'Highlight',
+    Default = false,
+    Tooltip = 'Highlight NPC bodies through walls (Only works if Master ESP is ON)',
+})
+
+NPCEspGroup:AddDivider()
+
+NPCEspGroup:AddLabel('Name Color'):AddColorPicker('NPCEspColor', {
+    Default = Color3.fromRGB(160, 32, 240), -- Purple
+    Title = 'NPC Name Color',
+})
+
+NPCEspGroup:AddLabel('Distance Color'):AddColorPicker('NPCEspDistColor', {
+    Default = Color3.fromRGB(200, 100, 255), -- Light purple
+    Title = 'NPC Distance Color',
+})
+
+NPCEspGroup:AddLabel('Highlight Color'):AddColorPicker('NPCEspFillColor', {
+    Default = Color3.fromRGB(128, 0, 255), -- Dark purple
+    Title = 'NPC Highlight Color',
+})
+
+NPCEspGroup:AddSlider('NPCEspFillTrans', {
+    Text = 'Fill Transparency',
+    Default = 0.5,
+    Min = 0,
+    Max = 1,
+    Rounding = 1,
+    Compact = false,
+})
+
+NPCEspGroup:AddSlider('NPCEspSize', {
+    Text = 'Text Size',
+    Default = 14,
+    Min = 8,
+    Max = 24,
+    Rounding = 0,
+    Compact = false,
+})
+
+NPCEspGroup:AddDivider()
+NPCEspGroup:AddSlider('NPCEspMaxDistance', {
+    Text = 'Max Distance',
+    Default = 1000,
+    Min = 50,
+    Max = 5000,
+    Rounding = 0,
+    Compact = false,
+    Tooltip = 'ESP only shows NPCs within this distance'
+})
+
+-- Utilities Buttons
+LeftGroupBox:AddButton('Force Reset', function()
+    local char = LP.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        char.HumanoidRootPart.CFrame = CFrame.new(9999999999999, 9999999999999, 9999999999999)
+    end
+end)
+
+LeftGroupBox:AddButton('TP to Etrean Luminant', function()
+    teleportToEtreanLuminant()
+end)
+
+LeftGroupBox:AddButton('TP to Eastern Luminant', function()
+    teleportToEasternLuminant()
+end)
+
+-- Movement Group
+MovementGroupBox:AddToggle('NoclipToggle', {
+    Text = 'Noclip',
+    Default = false,
+    Tooltip = 'Walk through walls',
+    Callback = function(Value)
+        if Value then
+            enableNoclip()
+        else
+            disableNoclip()
+        end
+    end
+})
+
+MovementGroupBox:AddLabel('Noclip Keybind'):AddKeyPicker('NoclipKeybind', {
+    Default = '',
+    SyncToggleState = true,
+    Mode = 'Toggle',
+    Text = 'Toggle Noclip',
+    NoUI = false,
+})
+
+Options.NoclipKeybind:OnClick(function()
+    Toggles.NoclipToggle:SetValue(not Toggles.NoclipToggle.Value)
+end)
+
+MovementGroupBox:AddDivider()
+
+MovementGroupBox:AddToggle('FlyToggle', {
+    Text = 'Fly',
+    Default = false,
+    Tooltip = 'Enable / disable fly (WASD + Space + Ctrl)',
+    Callback = function(Value)
+        if Value then startFly() else stopFly() end
+    end
+})
+
+MovementGroupBox:AddLabel('Fly Keybind'):AddKeyPicker('FlyKeybind', {
+    Default = '',
+    SyncToggleState = true,
+    Mode = 'Toggle',
+    Text = 'Toggle Fly',
+    NoUI = false,
+})
+
+Options.FlyKeybind:OnClick(function()
+    Toggles.FlyToggle:SetValue(not Toggles.FlyToggle.Value)
+end)
+
+MovementGroupBox:AddSlider('FlySpeed', {
+    Text = 'Fly Speed',
+    Default = 80,
+    Min = 10,
+    Max = 300,
+    Rounding = 0,
+    Compact = false,
+})
+
+Options.FlySpeed:OnChanged(function()
+    flySpeed = Options.FlySpeed.Value
+end)
+
+MovementGroupBox:AddDivider()
+
+MovementGroupBox:AddToggle('AgilitySpooferToggle', {
+    Text = 'Agility Spoofer',
+    Default = false,
+    Tooltip = 'Spoofs your PassiveAgility value in workspace.live',
+    Callback = function(Value)
+        if Value then
+            enableAgilitySpoofer()
+        else
+            disableAgilitySpoofer()
+        end
+    end
+})
+
+MovementGroupBox:AddSlider('AgilitySlider', {
+    Text = 'Agility Value',
+    Default = 100,
+    Min = 0,
+    Max = 500,
+    Rounding = 0,
+    Compact = false,
+})
+
+Options.AgilitySlider:OnChanged(function()
+    if Toggles.AgilitySpooferToggle.Value then
+        enableAgilitySpoofer()
+    end
+end)
+
+-- RenderStepped
+RunService.RenderStepped:Connect(function()
+    if Toggles.FlyToggle.Value then
+        local char = LP.Character
+        if char then
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp and St.flyBV then
+                local cam = workspace.CurrentCamera
+                if cam then
+                    local dir = Vector3.zero
+
+                    if UserInput:IsKeyDown(Enum.KeyCode.W) then dir += cam.CFrame.LookVector end
+                    if UserInput:IsKeyDown(Enum.KeyCode.S) then dir -= cam.CFrame.LookVector end
+                    if UserInput:IsKeyDown(Enum.KeyCode.A) then dir -= cam.CFrame.RightVector end
+                    if UserInput:IsKeyDown(Enum.KeyCode.D) then dir += cam.CFrame.RightVector end
+                    if UserInput:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.new(0, 1, 0) end
+                    if UserInput:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= Vector3.new(0, 1, 0) end
+
+                    St.flyBV.Velocity = if dir.Magnitude > 0 then dir.Unit * flySpeed else Vector3.zero
+                end
+            end
+        end
+    end
+
+    updateAllESP()
+end)
+
+LP.CharacterAdded:Connect(function()
+    task.wait(1)
+    if Toggles.FlyToggle.Value then startFly() end
+    if Toggles.NoclipToggle.Value then enableNoclip() end
+end)
+
+LP.AncestryChanged:Connect(function()
+    disableAgilitySpoofer()
+    disableNoclip()
+    stopFly()
+    if etreanTeleportConnection then
+        etreanTeleportConnection:Disconnect()
+        etreanTeleportConnection = nil
+    end
+    isTeleportingToEtrean = false
+    if easternTeleportConnection then
+        easternTeleportConnection:Disconnect()
+        easternTeleportConnection = nil
+    end
+    isTeleportingToEastern = false
+end)
+
+-- UI Settings
+local MenuGroup = Tabs['UI Settings']:AddLeftGroupbox('Menu')
+MenuGroup:AddButton('Unload', function()
+    espPlayersMasterEnabled = false
+    espMobsMasterEnabled = false
+    espNPCsMasterEnabled = false
+    disableAgilitySpoofer()
+    disableNoclip()
+    stopFly()
+    
+    if etreanTeleportConnection then
+        etreanTeleportConnection:Disconnect()
+        etreanTeleportConnection = nil
+    end
+    isTeleportingToEtrean = false
+    if easternTeleportConnection then
+        easternTeleportConnection:Disconnect()
+        easternTeleportConnection = nil
+    end
+    isTeleportingToEastern = false
+    
+    for _, e in pairs(espPlayers) do
+        if e then
+            e.name:Remove()
+            e.dist:Remove()
+            if e.hp then e.hp:Remove() end
+            if e.highlight and e.highlight.Parent then
+                e.highlight:Destroy()
+            end
+        end
+    end
+    for _, e in pairs(espMobs) do
+        if e then
+            e.name:Remove()
+            e.dist:Remove()
+            if e.hp then e.hp:Remove() end
+            if e.highlight and e.highlight.Parent then
+                e.highlight:Destroy()
+            end
+        end
+    end
+    for _, e in pairs(espNPCs) do
+        if e then
+            e.name:Remove()
+            e.dist:Remove()
+            if e.hp then e.hp:Remove() end
+            if e.highlight and e.highlight.Parent then
+                e.highlight:Destroy()
+            end
+        end
+    end
+    Library:Unload()
+end)
+
+MenuGroup:AddLabel('Menu bind'):AddKeyPicker('MenuKeybind', { 
+    Default = 'RightShift', 
+    NoUI = true, 
+    Text = 'Menu keybind' 
+})
+Library.ToggleKeybind = Options.MenuKeybind
+
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ 
+    'MenuKeybind', 
+    'NoclipKeybind', 
+    'FlyKeybind',
+    'ESPPlayerMasterKeybind',
+    'ESPMobMasterKeybind',
+    'ESPNPCMasterKeybind'
+})
+ThemeManager:SetFolder('FlyScript')
+SaveManager:SetFolder('FlyScript/config')
+SaveManager:BuildConfigSection(Tabs['UI Settings'])
+ThemeManager:ApplyToTab(Tabs['UI Settings'])
+SaveManager:LoadAutoloadConfig()
