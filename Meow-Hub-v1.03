@@ -19,6 +19,19 @@ local espPlayersMasterEnabled = false
 local espMobsMasterEnabled = false
 local espNPCsMasterEnabled = false
 
+-- FFlags variables
+local fflagsActive = false
+local fflagsConnection = nil
+local LOW_TEXTURE = "rbxassetid://130143779"
+
+-- Fullbright variables (IMPROVED)
+local fullbrightActive = false
+local originalBrightness = nil
+local originalAmbient = nil
+local originalOutdoorAmbient = nil
+local originalClockTime = nil
+local originalEffectStates = {} -- Store original states of effects
+
 -- FPS and MS counter variables
 local fpsCounter = Drawing.new("Text")
 fpsCounter.Visible = false
@@ -61,19 +74,6 @@ local savedAgilityValues = {}
 local noclipConnection = nil
 local savedCollisionStates = {}
 
--- Fullbright variables
-local fullbrightConnection = nil
-local savedLightingSettings = {
-    Brightness = nil,
-    ClockTime = nil,
-    TimeOfDay = nil,
-    Ambient = nil,
-    OutdoorAmbient = nil,
-    ColorShift_Top = nil,
-    ColorShift_Bottom = nil
-}
-local savedAreaBrightness = nil
-
 -- Void Mobs variables
 local voidMobsConnection = nil
 local VOID_Y_COORDINATE = -15000
@@ -91,6 +91,174 @@ local espNPCs = {}
 
 -- Cache for ESP calculations
 local distCache = {}
+
+-- FFlags functions
+local function downgradeObject(obj)
+    if obj:IsA("BasePart") then
+        obj.Material = Enum.Material.Plastic
+        obj.Reflectance = 0
+        obj.CastShadow = false
+    end
+    
+    if obj:IsA("Texture") or obj:IsA("Decal") then
+        obj.Texture = LOW_TEXTURE
+    elseif obj:IsA("SurfaceAppearance") then
+        obj.ColorMap = LOW_TEXTURE
+        obj.MetalnessMap = ""
+        obj.RoughnessMap = ""
+        obj.NormalMap = ""
+    end
+
+    if obj:IsA("ParticleEmitter") then
+        obj.Enabled = false
+        obj.Rate = 0
+        obj.Speed = NumberRange.new(0)
+    end
+
+    if obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+        obj.Enabled = false
+        obj.Brightness = 0
+        obj.Range = 2
+    end
+
+    if obj:IsA("BloomEffect") 
+        or obj:IsA("BlurEffect")
+        or obj:IsA("ColorCorrectionEffect")
+        or obj:IsA("SunRaysEffect")
+        or obj:IsA("DepthOfFieldEffect")
+    then
+        obj.Enabled = false
+    end
+end
+
+local function enableFFlags()
+    if fflagsActive then return end
+    
+    -- Apply lighting changes
+    Lighting.GlobalShadows = false
+    Lighting.Brightness = 1
+    Lighting.Ambient = Color3.new(1, 1, 1)
+    Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+
+    local atmo = Lighting:FindFirstChildOfClass("Atmosphere")
+    if atmo then
+        atmo.Density = 0
+        atmo.Haze = 0
+        atmo.Glare = 0
+    end
+
+    for _, effect in ipairs(Lighting:GetChildren()) do
+        if effect:IsA("BloomEffect")
+        or effect:IsA("BlurEffect")
+        or effect:IsA("ColorCorrectionEffect")
+        or effect:IsA("SunRaysEffect")
+        or effect:IsA("DepthOfFieldEffect") then
+            effect.Enabled = false
+        end
+    end
+
+    -- Make water transparent
+    pcall(function()
+        workspace.Terrain.WaterTransparency = 1
+        workspace.Terrain.WaterReflectance = 0
+    end)
+
+    -- Process all existing objects
+    task.spawn(function()
+        for _, obj in ipairs(game:GetDescendants()) do
+            downgradeObject(obj)
+        end
+    end)
+
+    -- Watch for new objects
+    fflagsConnection = game.DescendantAdded:Connect(function(obj)
+        task.defer(function()
+            downgradeObject(obj)
+        end)
+    end)
+    
+    fflagsActive = true
+end
+
+local function disableFFlags()
+    if not fflagsActive then return end
+    
+    if fflagsConnection then
+        fflagsConnection:Disconnect()
+        fflagsConnection = nil
+    end
+    
+    fflagsActive = false
+    warn("FFlags disabled but some visual changes may persist. Reload the script to fully revert.")
+end
+
+-- IMPROVED Fullbright functions
+local function saveEffectStates()
+    originalEffectStates = {}
+    for _, effect in ipairs(Lighting:GetChildren()) do
+        if effect:IsA("Atmosphere") or effect:IsA("BlurEffect") or effect:IsA("ColorCorrectionEffect") then
+            originalEffectStates[effect] = effect.Enabled
+        end
+    end
+end
+
+local function restoreEffectStates()
+    for effect, wasEnabled in pairs(originalEffectStates) do
+        if effect and effect.Parent then
+            effect.Enabled = wasEnabled
+        end
+    end
+    originalEffectStates = {}
+end
+
+local function applyFullbright()
+    Lighting.Brightness = 2
+    Lighting.Ambient = Color3.fromRGB(178, 178, 178)
+    Lighting.OutdoorAmbient = Color3.fromRGB(178, 178, 178)
+    Lighting.ClockTime = 12
+    
+    -- Disable visual effects
+    for _, effect in ipairs(Lighting:GetChildren()) do
+        if effect:IsA("Atmosphere") or effect:IsA("BlurEffect") or effect:IsA("ColorCorrectionEffect") then
+            effect.Enabled = false
+        end
+    end
+end
+
+local function enableFullbright()
+    if fullbrightActive then return end
+    
+    -- Store original values
+    originalBrightness = Lighting.Brightness
+    originalAmbient = Lighting.Ambient
+    originalOutdoorAmbient = Lighting.OutdoorAmbient
+    originalClockTime = Lighting.ClockTime
+    saveEffectStates()
+    
+    applyFullbright()
+    fullbrightActive = true
+end
+
+local function disableFullbright()
+    if not fullbrightActive then return end
+    
+    -- Restore original values
+    if originalBrightness then Lighting.Brightness = originalBrightness end
+    if originalAmbient then Lighting.Ambient = originalAmbient end
+    if originalOutdoorAmbient then Lighting.OutdoorAmbient = originalOutdoorAmbient end
+    if originalClockTime then Lighting.ClockTime = originalClockTime end
+    
+    restoreEffectStates()
+    fullbrightActive = false
+end
+
+local function toggleFullbright()
+    if fullbrightActive then
+        disableFullbright()
+    else
+        enableFullbright()
+    end
+end
 
 local function isMob(model)
     return model.Name:sub(1, 1) == "."
@@ -257,77 +425,6 @@ local function disableNoclip()
             end
         end
     end
-end
-
--- Fullbright functions
-local function saveLightingSettings()
-    savedLightingSettings.Brightness = Lighting.Brightness
-    savedLightingSettings.ClockTime = Lighting.ClockTime
-    savedLightingSettings.TimeOfDay = Lighting.TimeOfDay
-    savedLightingSettings.Ambient = Lighting.Ambient
-    savedLightingSettings.OutdoorAmbient = Lighting.OutdoorAmbient
-    savedLightingSettings.ColorShift_Top = Lighting.ColorShift_Top
-    savedLightingSettings.ColorShift_Bottom = Lighting.ColorShift_Bottom
-    
-    if Lighting:FindFirstChild("AreaBrightness") then
-        savedAreaBrightness = Lighting.AreaBrightness.Value
-    end
-end
-
-local function restoreLightingSettings()
-    Lighting.Brightness = savedLightingSettings.Brightness
-    Lighting.ClockTime = savedLightingSettings.ClockTime
-    Lighting.TimeOfDay = savedLightingSettings.TimeOfDay
-    Lighting.Ambient = savedLightingSettings.Ambient
-    Lighting.OutdoorAmbient = savedLightingSettings.OutdoorAmbient
-    Lighting.ColorShift_Top = savedLightingSettings.ColorShift_Top
-    Lighting.ColorShift_Bottom = savedLightingSettings.ColorShift_Bottom
-    
-    if Lighting:FindFirstChild("AreaBrightness") and savedAreaBrightness ~= nil then
-        Lighting.AreaBrightness.Value = savedAreaBrightness
-    end
-end
-
-local function enableFullbright()
-    if fullbrightConnection then return end
-    
-    saveLightingSettings()
-    
-    Lighting.Brightness = 2
-    Lighting.ClockTime = 14
-    Lighting.TimeOfDay = "14:00:00"
-    Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-    Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
-    Lighting.ColorShift_Top = Color3.fromRGB(255, 255, 255)
-    Lighting.ColorShift_Bottom = Color3.fromRGB(255, 255, 255)
-    
-    if Lighting:FindFirstChild("AreaBrightness") then
-        Lighting.AreaBrightness.Value = 1
-    end
-    
-    fullbrightConnection = RunService.RenderStepped:Connect(function()
-        if Toggles.FullbrightToggle and Toggles.FullbrightToggle.Value then
-            Lighting.Brightness = 2
-            Lighting.ClockTime = 14
-            Lighting.TimeOfDay = "14:00:00"
-            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-            Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
-            Lighting.ColorShift_Top = Color3.fromRGB(255, 255, 255)
-            Lighting.ColorShift_Bottom = Color3.fromRGB(255, 255, 255)
-            
-            if Lighting:FindFirstChild("AreaBrightness") then
-                Lighting.AreaBrightness.Value = 1
-            end
-        end
-    end)
-end
-
-local function disableFullbright()
-    if fullbrightConnection then
-        fullbrightConnection:Disconnect()
-        fullbrightConnection = nil
-    end
-    restoreLightingSettings()
 end
 
 -- Void Mobs functions
@@ -939,7 +1036,7 @@ task.spawn(watchNPCs)
 
 -- UI
 local Window = Library:CreateWindow({
-    Title = 'Meow :3',
+    Title = 'Meow Hub :3',
     Center = true,
     AutoShow = true,
     TabPadding = 8,
@@ -1324,6 +1421,15 @@ Options.FullbrightKeybind:OnClick(function()
     Toggles.FullbrightToggle:SetValue(not Toggles.FullbrightToggle.Value)
 end)
 
+-- FFlags Button
+VisualsGroupBox:AddButton('FFlags', function()
+    if fflagsActive then
+        disableFFlags()
+    else
+        enableFFlags()
+    end
+end)
+
 -- ============ FPS & PING IN UTILITIES ============
 LeftGroupBox:AddToggle('ShowFPS', {
     Text = 'Show FPS',
@@ -1573,6 +1679,9 @@ MenuGroup:AddButton('Unload', function()
     stopFly()
     if Toggles.FullbrightToggle and Toggles.FullbrightToggle.Value then
         disableFullbright()
+    end
+    if fflagsActive then
+        disableFFlags()
     end
     
     fpsCounter:Remove()
