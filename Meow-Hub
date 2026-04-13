@@ -1741,16 +1741,8 @@ Library.ToggleKeybind = Options.MenuKeybind
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({ 
-    'MenuKeybind', 
-    'NoclipKeybind', 
-    'FlyKeybind',
-    'FullbrightKeybind',
-    'VoidMobsKeybind',
-    'ESPPlayerMasterKeybind',
-    'ESPMobMasterKeybind',
-    'ESPNPCMasterKeybind'
-})
+-- FIXED: Removed keybinds from ignore list so they save properly
+SaveManager:SetIgnoreIndexes({}) -- Empty table = save everything
 ThemeManager:SetFolder('MeowHub')
 SaveManager:SetFolder('MeowHub/config')
 SaveManager:BuildConfigSection(Tabs['UI Settings'])
