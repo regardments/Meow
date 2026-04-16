@@ -30,7 +30,7 @@ local originalBrightness = nil
 local originalAmbient = nil
 local originalOutdoorAmbient = nil
 local originalClockTime = nil
-local originalEffectStates = {}
+local originalEffectStates = {} -- Store original states of effects
 
 -- FPS and MS counter variables
 local fpsCounter = Drawing.new("Text")
@@ -85,92 +85,12 @@ local isTeleportingToEtrean = false
 local easternTeleportConnection = nil
 local isTeleportingToEastern = false
 
--- Intelligence Farm variables
-local intelligenceFarmConnection = nil
-local isIntelligenceFarming = false
-
--- Charisma Farm variables
-local charismaFarmConnection = nil
-local isCharismaFarming = false
-
--- Fish Farm variables
-local fishFarmConnection = nil
-local isFishFarming = false
-local fishFarmTimestamp = 0
-local wasActivated = false
-
--- Anti-AFK variables
-local antiAFKActive = false
-local antiAFKConnection = nil
-
 local espPlayers = {}
 local espMobs = {}
 local espNPCs = {}
 
 -- Cache for ESP calculations
 local distCache = {}
-
--- Simple logger function for notifications
-local function Logger(message)
-    warn("[Meow Hub] " .. message)
-end
-
--- ============ UTILITY FUNCTIONS ============
-
--- Get player's current Intelligence stat
-local function getCurrentIntelligence()
-    local localPlayer = Players.LocalPlayer
-    local character = localPlayer.Character
-    if not character then return 0 end
-    
-    local statIntelligence = character:FindFirstChild("Stat_Intelligence")
-    if statIntelligence and type(statIntelligence.Value) == "number" then
-        return statIntelligence.Value
-    end
-    
-    return 0
-end
-
--- Get player's current Charisma stat
-local function getCurrentCharisma()
-    local localPlayer = Players.LocalPlayer
-    local character = localPlayer.Character
-    if not character then return 0 end
-    
-    local statCharisma = character:FindFirstChild("Stat_Charisma")
-    if statCharisma and type(statCharisma.Value) == "number" then
-        return statCharisma.Value
-    end
-    
-    return 0
-end
-
--- Anti-AFK functions
-local function startAntiAFK()
-    if antiAFKConnection then return end
-    
-    antiAFKConnection = RunService.RenderStepped:Connect(function()
-        if antiAFKActive then
-            -- Simulate small movements to prevent AFK kick
-            local char = LP.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                local hrp = char.HumanoidRootPart
-                local currentPos = hrp.Position
-                -- Very small movement that won't affect gameplay but prevents AFK
-                hrp.CFrame = hrp.CFrame + Vector3.new(0, 0.001, 0)
-                task.wait(0.1)
-                hrp.CFrame = CFrame.new(currentPos)
-            end
-        end
-    end)
-end
-
-local function stopAntiAFK()
-    if antiAFKConnection then
-        antiAFKConnection:Disconnect()
-        antiAFKConnection = nil
-    end
-end
 
 -- FFlags functions
 local function downgradeObject(obj)
@@ -214,6 +134,7 @@ end
 local function enableFFlags()
     if fflagsActive then return end
     
+    -- Apply lighting changes
     Lighting.GlobalShadows = false
     Lighting.Brightness = 1
     Lighting.Ambient = Color3.new(1, 1, 1)
@@ -236,17 +157,20 @@ local function enableFFlags()
         end
     end
 
+    -- Make water transparent
     pcall(function()
         workspace.Terrain.WaterTransparency = 1
         workspace.Terrain.WaterReflectance = 0
     end)
 
+    -- Process all existing objects
     task.spawn(function()
         for _, obj in ipairs(game:GetDescendants()) do
             downgradeObject(obj)
         end
     end)
 
+    -- Watch for new objects
     fflagsConnection = game.DescendantAdded:Connect(function(obj)
         task.defer(function()
             downgradeObject(obj)
@@ -268,7 +192,7 @@ local function disableFFlags()
     warn("FFlags disabled but some visual changes may persist. Reload the script to fully revert.")
 end
 
--- Fullbright functions
+-- IMPROVED Fullbright functions
 local function saveEffectStates()
     originalEffectStates = {}
     for _, effect in ipairs(Lighting:GetChildren()) do
@@ -293,6 +217,7 @@ local function applyFullbright()
     Lighting.OutdoorAmbient = Color3.fromRGB(178, 178, 178)
     Lighting.ClockTime = 12
     
+    -- Disable visual effects
     for _, effect in ipairs(Lighting:GetChildren()) do
         if effect:IsA("Atmosphere") or effect:IsA("BlurEffect") or effect:IsA("ColorCorrectionEffect") then
             effect.Enabled = false
@@ -303,6 +228,7 @@ end
 local function enableFullbright()
     if fullbrightActive then return end
     
+    -- Store original values
     originalBrightness = Lighting.Brightness
     originalAmbient = Lighting.Ambient
     originalOutdoorAmbient = Lighting.OutdoorAmbient
@@ -316,6 +242,7 @@ end
 local function disableFullbright()
     if not fullbrightActive then return end
     
+    -- Restore original values
     if originalBrightness then Lighting.Brightness = originalBrightness end
     if originalAmbient then Lighting.Ambient = originalAmbient end
     if originalOutdoorAmbient then Lighting.OutdoorAmbient = originalOutdoorAmbient end
@@ -323,6 +250,14 @@ local function disableFullbright()
     
     restoreEffectStates()
     fullbrightActive = false
+end
+
+local function toggleFullbright()
+    if fullbrightActive then
+        disableFullbright()
+    else
+        enableFullbright()
+    end
 end
 
 local function isMob(model)
@@ -562,488 +497,6 @@ local function disableVoidMobs()
         voidMobsConnection:Disconnect()
         voidMobsConnection = nil
     end
-end
-
--- ============ INTELLIGENCE FARMING FUNCTIONS ============
-local function updateIntelligence()
-    if not Toggles.AutoIntelligence or not Toggles.AutoIntelligence.Value then
-        return
-    end
-    
-    local intelligenceCap = Options.IntelligenceCap
-    if not intelligenceCap then
-        return
-    end
-    
-    local currentIntelligence = getCurrentIntelligence()
-    local targetCap = intelligenceCap.Value
-    
-    if currentIntelligence >= targetCap then
-        Logger("Intelligence AutoFarm reached cap (" .. targetCap .. "), current: " .. currentIntelligence .. ", stopping.")
-        Toggles.AutoIntelligence:SetValue(false)
-        return
-    end
-    
-    local localPlayer = Players.LocalPlayer
-    local localPlayerCharacter = localPlayer.Character
-    if not localPlayerCharacter then
-        return
-    end
-    
-    local humanoid = localPlayerCharacter:FindFirstChild("Humanoid")
-    if not humanoid then
-        return
-    end
-    
-    local backpack = localPlayer:FindFirstChild("Backpack")
-    if not backpack then
-        return
-    end
-    
-    local characterBook = localPlayerCharacter:FindFirstChild("Math Textbook")
-    local backpackBook = backpack:FindFirstChild("Math Textbook")
-    
-    if not characterBook and backpackBook then
-        humanoid:EquipTool(backpackBook)
-        return
-    end
-    
-    local choicePrompt = localPlayer.PlayerGui:FindFirstChild("ChoicePrompt")
-    if not choicePrompt then
-        if characterBook then
-            characterBook:Activate()
-        end
-        return
-    end
-    
-    local choiceRemote = choicePrompt:FindFirstChild("Choice")
-    if not choiceRemote then
-        return
-    end
-    
-    local choiceFrame = choicePrompt:FindFirstChild("ChoiceFrame")
-    if not choiceFrame then
-        return
-    end
-    
-    local descSheet = choiceFrame:FindFirstChild("DescSheet")
-    local description = descSheet and descSheet:FindFirstChild("Desc")
-    if not description then
-        return
-    end
-    
-    local options = choiceFrame:FindFirstChild("Options")
-    if not options then
-        return
-    end
-    
-    local answers = {}
-    
-    for _, instance in next, options:GetChildren() do
-        if not instance:IsA("TextButton") then
-            continue
-        end
-        
-        local number = tonumber(instance.Name)
-        if not number then
-            continue
-        end
-        
-        table.insert(answers, number)
-    end
-    
-    local descriptionText = tostring(description.Text)
-    local parsedDescription = descriptionText:gsub("What is", ""):gsub(" ", ""):gsub("?", ""):gsub("by", "")
-    
-    local operation = nil
-    
-    if parsedDescription:find("divided") then
-        operation = "divided"
-    elseif parsedDescription:find("times") then
-        operation = "times"
-    elseif parsedDescription:find("plus") then
-        operation = "plus"
-    elseif parsedDescription:find("minus") then
-        operation = "minus"
-    end
-    
-    if not operation then
-        return
-    end
-    
-    local firstNumber = nil
-    local secondNumber = nil
-    
-    if operation == "divided" then
-        local parts = {}
-        local splitIndex = parsedDescription:find("divided")
-        if splitIndex then
-            parts[1] = parsedDescription:sub(1, splitIndex - 1)
-            parts[2] = parsedDescription:sub(splitIndex + #"divided")
-        end
-        firstNumber = tonumber(parts[1])
-        secondNumber = tonumber(parts[2])
-    elseif operation == "times" then
-        local parts = {}
-        local splitIndex = parsedDescription:find("times")
-        if splitIndex then
-            parts[1] = parsedDescription:sub(1, splitIndex - 1)
-            parts[2] = parsedDescription:sub(splitIndex + #"times")
-        end
-        firstNumber = tonumber(parts[1])
-        secondNumber = tonumber(parts[2])
-    elseif operation == "plus" then
-        local parts = {}
-        local splitIndex = parsedDescription:find("plus")
-        if splitIndex then
-            parts[1] = parsedDescription:sub(1, splitIndex - 1)
-            parts[2] = parsedDescription:sub(splitIndex + #"plus")
-        end
-        firstNumber = tonumber(parts[1])
-        secondNumber = tonumber(parts[2])
-    elseif operation == "minus" then
-        local parts = {}
-        local splitIndex = parsedDescription:find("minus")
-        if splitIndex then
-            parts[1] = parsedDescription:sub(1, splitIndex - 1)
-            parts[2] = parsedDescription:sub(splitIndex + #"minus")
-        end
-        firstNumber = tonumber(parts[1])
-        secondNumber = tonumber(parts[2])
-    end
-    
-    if not firstNumber or not secondNumber then
-        return
-    end
-    
-    local answer = nil
-    
-    if operation == "divided" then
-        answer = firstNumber / secondNumber
-    elseif operation == "times" then
-        answer = firstNumber * secondNumber
-    elseif operation == "plus" then
-        answer = firstNumber + secondNumber
-    elseif operation == "minus" then
-        answer = firstNumber - secondNumber
-    end
-    
-    local closestAnswer = nil
-    local closestDifference = nil
-    
-    for _, possible in next, answers do
-        local delta = math.abs(answer - possible)
-        
-        if closestDifference == nil or delta < closestDifference then
-            closestAnswer = possible
-            closestDifference = delta
-        end
-    end
-    
-    if not closestAnswer then
-        return
-    end
-    
-    choiceRemote:FireServer(tostring(closestAnswer))
-end
-
-local function enableIntelligenceFarm()
-    if intelligenceFarmConnection then return end
-    
-    local currentInt = getCurrentIntelligence()
-    local targetCap = Options.IntelligenceCap.Value
-    Logger("Intelligence Farm enabled. Current: " .. currentInt .. " / Target: " .. targetCap)
-    
-    if currentInt >= targetCap then
-        Logger("Already at or above target cap! (" .. currentInt .. " >= " .. targetCap .. ")")
-        Toggles.AutoIntelligence:SetValue(false)
-        return
-    end
-    
-    intelligenceFarmConnection = RunService.RenderStepped:Connect(function()
-        updateIntelligence()
-    end)
-    
-    isIntelligenceFarming = true
-end
-
-local function disableIntelligenceFarm()
-    if intelligenceFarmConnection then
-        intelligenceFarmConnection:Disconnect()
-        intelligenceFarmConnection = nil
-    end
-    isIntelligenceFarming = false
-    Logger("Intelligence Farm disabled.")
-end
-
--- ============ CHARISMA FARMING FUNCTIONS ============
-local function updateCharisma()
-    if not Toggles.AutoCharisma or not Toggles.AutoCharisma.Value then
-        return
-    end
-    
-    local charismaCap = Options.CharismaCap
-    if not charismaCap then
-        return
-    end
-    
-    local currentCharisma = getCurrentCharisma()
-    local targetCap = charismaCap.Value
-    
-    if currentCharisma >= targetCap then
-        Logger("Charisma AutoFarm reached cap (" .. targetCap .. "), current: " .. currentCharisma .. ", stopping.")
-        Toggles.AutoCharisma:SetValue(false)
-        return
-    end
-    
-    local localPlayer = Players.LocalPlayer
-    local localPlayerCharacter = localPlayer.Character
-    if not localPlayerCharacter then
-        return
-    end
-    
-    local humanoid = localPlayerCharacter:FindFirstChild("Humanoid")
-    if not humanoid then
-        return
-    end
-    
-    local backpack = localPlayer:FindFirstChild("Backpack")
-    if not backpack then
-        return
-    end
-    
-    local characterBook = localPlayerCharacter:FindFirstChild("How to Make Friends")
-    local backpackBook = backpack:FindFirstChild("How to Make Friends")
-    
-    if not characterBook and backpackBook then
-        humanoid:EquipTool(backpackBook)
-        return
-    end
-    
-    local choicePrompt = localPlayer.PlayerGui:FindFirstChild("ChoicePrompt")
-    if not choicePrompt then
-        if characterBook then
-            characterBook:Activate()
-        end
-        return
-    end
-    
-    local choiceFrame = choicePrompt:FindFirstChild("ChoiceFrame")
-    if not choiceFrame then
-        return
-    end
-    
-    local chatChoice = choicePrompt:FindFirstChild("ChatChoice")
-    if not chatChoice then
-        return
-    end
-    
-    local description = choiceFrame:FindFirstChild("Desc")
-    if not description then
-        return
-    end
-    
-    local text = description.Text:split("\n")
-    if #text < 2 then
-        return
-    end
-    
-    local charismaLine = text[2]:sub(2, -2)
-    
-    chatChoice:InvokeServer(charismaLine)
-end
-
-local function enableCharismaFarm()
-    if charismaFarmConnection then return end
-    
-    local currentChar = getCurrentCharisma()
-    local targetCap = Options.CharismaCap.Value
-    Logger("Charisma Farm enabled. Current: " .. currentChar .. " / Target: " .. targetCap)
-    
-    if currentChar >= targetCap then
-        Logger("Already at or above target cap! (" .. currentChar .. " >= " .. targetCap .. ")")
-        Toggles.AutoCharisma:SetValue(false)
-        return
-    end
-    
-    charismaFarmConnection = RunService.RenderStepped:Connect(function()
-        updateCharisma()
-    end)
-    
-    isCharismaFarming = true
-end
-
-local function disableCharismaFarm()
-    if charismaFarmConnection then
-        charismaFarmConnection:Disconnect()
-        charismaFarmConnection = nil
-    end
-    isCharismaFarming = false
-    Logger("Charisma Farm disabled.")
-end
-
--- ============ FISH FARMING FUNCTIONS ============
-local baitTable = {
-    "Plumfruit",
-    "Pomar",
-    "Gobletto",
-    "Squid",
-    "Dentifilo",
-    "Seaweed Bundle",
-    "Urchin",
-    "Browncap",
-    "Chum",
-    "Calabash",
-    "Pufferfish",
-    "Redd",
-}
-
-local function updateFishFarm()
-    if not Toggles.AutoFish or not Toggles.AutoFish.Value then
-        return
-    end
-    
-    -- Rate limiting
-    local currentTime = os.clock()
-    if currentTime - fishFarmTimestamp < 0.1 then
-        return
-    end
-    fishFarmTimestamp = currentTime
-    
-    -- Anti-AFK handling
-    if Toggles.AntiAFK and Toggles.AntiAFK.Value then
-        antiAFKActive = true
-        startAntiAFK()
-    else
-        antiAFKActive = false
-        stopAntiAFK()
-    end
-    
-    local localPlayer = Players.LocalPlayer
-    local localPlayerCharacter = localPlayer.Character
-    if not localPlayerCharacter then
-        return
-    end
-    
-    local humanoid = localPlayerCharacter:FindFirstChild("Humanoid")
-    if not humanoid then
-        return
-    end
-    
-    local backpack = localPlayer:FindFirstChild("Backpack")
-    if not backpack then
-        return
-    end
-    
-    local characterRod = localPlayerCharacter:FindFirstChild("Fishing Rod")
-    local backpackRod = backpack:FindFirstChild("Fishing Rod")
-    
-    if not characterRod then
-        if backpackRod then
-            humanoid:EquipTool(backpackRod)
-        end
-        return
-    end
-    
-    local handle = characterRod:FindFirstChild("Handle")
-    local rod = handle and handle:FindFirstChild("Rod")
-    local bobby = rod and rod:FindFirstChild("bobby")
-    if not bobby then
-        return
-    end
-    
-    local addBait = characterRod:FindFirstChild("AddBait")
-    if not addBait then
-        return
-    end
-    
-    -- Add bait if needed
-    for _, baitName in next, baitTable do
-        local bait = backpack:FindFirstChild(baitName)
-        if not bait then
-            continue
-        end
-        
-        if bobby:FindFirstChild("bait") then
-            break
-        end
-        
-        addBait:FireServer(bait)
-        return
-    end
-    
-    local hook = bobby:FindFirstChild("hook")
-    if not hook then
-        return
-    end
-    
-    -- Cast/Reel logic
-    if hook.Transparency ~= 1.0 then
-        wasActivated = not wasActivated
-        if wasActivated then
-            characterRod:Deactivate()
-        else
-            characterRod:Activate()
-        end
-        return
-    end
-    
-    local inputUpdate = characterRod:FindFirstChild("InputUpdate")
-    if not inputUpdate then
-        return
-    end
-    
-    local playerGui = localPlayer:FindFirstChild("PlayerGui")
-    if not playerGui then
-        return
-    end
-    
-    local fishingGui = playerGui:FindFirstChild("FishingGui")
-    if not fishingGui or not fishingGui.Enabled then
-        return
-    end
-    
-    local mainFrame = fishingGui:FindFirstChild("MainFrame")
-    if not mainFrame then
-        return
-    end
-    
-    local holdA = mainFrame:FindFirstChild("HoldA")
-    local holdS = mainFrame:FindFirstChild("HoldS")
-    local holdD = mainFrame:FindFirstChild("HoldD")
-    if not holdA or not holdS or not holdD then
-        return
-    end
-    
-    -- Send the fishing input
-    inputUpdate:FireServer({
-        a = holdA.Visible,
-        s = holdS.Visible,
-        d = holdD.Visible,
-    })
-end
-
-local function enableFishFarm()
-    if fishFarmConnection then return end
-    
-    Logger("Fish Farm enabled.")
-    
-    fishFarmConnection = RunService.RenderStepped:Connect(function()
-        updateFishFarm()
-    end)
-    
-    isFishFarming = true
-end
-
-local function disableFishFarm()
-    if fishFarmConnection then
-        fishFarmConnection:Disconnect()
-        fishFarmConnection = nil
-    end
-    isFishFarming = false
-    stopAntiAFK()
-    antiAFKActive = false
-    Logger("Fish Farm disabled.")
 end
 
 -- FPS and MS counter functions
@@ -1605,9 +1058,6 @@ local VisualsGroupBox = Tabs.Main:AddLeftGroupbox('Visuals')
 
 -- Farm Tab Groupboxes
 local FarmGroupBox = Tabs.Farm:AddLeftGroupbox('Mob Farming')
-local FishGroupBox = Tabs.Farm:AddRightGroupbox('Fish Farming')
-local IntelligenceGroupBox = Tabs.Farm:AddLeftGroupbox('Intelligence Farming')
-local CharismaGroupBox = Tabs.Farm:AddLeftGroupBox('Charisma Farming')
 
 -- ESP Tab - Using Tabboxes for different ESP types
 local ESPTabBox = Tabs.ESP:AddLeftTabbox()
@@ -1919,7 +1369,7 @@ NPCsTab:AddSlider('NPCEspMaxDistance', {
     Compact = false,
 })
 
--- ============ FARM SECTION - MOB FARMING ============
+-- ============ FARM SECTION ============
 FarmGroupBox:AddToggle('VoidMobsToggle', {
     Text = 'Void Mobs',
     Default = false,
@@ -1943,190 +1393,6 @@ FarmGroupBox:AddLabel('Void Mobs Keybind'):AddKeyPicker('VoidMobsKeybind', {
 
 Options.VoidMobsKeybind:OnClick(function()
     Toggles.VoidMobsToggle:SetValue(not Toggles.VoidMobsToggle.Value)
-end)
-
--- ============ FARM SECTION - FISH FARMING ============
-FishGroupBox:AddToggle('AutoFish', {
-    Text = 'Auto Fish Farm',
-    Default = false,
-    Tooltip = 'Automatically fishes using the Fishing Rod. Auto-equips rod, adds bait, and handles fishing mini-game.',
-    Callback = function(Value)
-        if Value then
-            enableFishFarm()
-        else
-            disableFishFarm()
-        end
-    end
-})
-
-FishGroupBox:AddLabel('Auto Fish Keybind'):AddKeyPicker('AutoFishKeybind', {
-    Default = '',
-    SyncToggleState = true,
-    Mode = 'Toggle',
-    Text = 'Toggle Auto Fish',
-    NoUI = false,
-})
-
-Options.AutoFishKeybind:OnClick(function()
-    Toggles.AutoFish:SetValue(not Toggles.AutoFish.Value)
-end)
-
-FishGroupBox:AddDivider()
-
-FishGroupBox:AddToggle('AntiAFK', {
-    Text = 'Anti-AFK',
-    Default = true,
-    Tooltip = 'Prevents being kicked for inactivity while fishing. Automatically enabled when Auto Fish is on.',
-    Callback = function(Value)
-        if Value and Toggles.AutoFish and Toggles.AutoFish.Value then
-            antiAFKActive = true
-            startAntiAFK()
-        elseif not Value then
-            antiAFKActive = false
-            stopAntiAFK()
-        end
-    end
-})
-
--- Available baits display
-FishGroupBox:AddDivider()
-FishGroupBox:AddLabel('Available Baits (Auto-selected):')
-for _, bait in ipairs(baitTable) do
-    FishGroupBox:AddLabel('  • ' .. bait)
-end
-
--- ============ FARM SECTION - INTELLIGENCE FARMING ============
-IntelligenceGroupBox:AddToggle('AutoIntelligence', {
-    Text = 'Auto Intelligence Farm',
-    Default = false,
-    Tooltip = 'Automatically solves math problems to farm Intelligence stat. Stops when reaching the cap value.',
-    Callback = function(Value)
-        if Value then
-            local currentInt = getCurrentIntelligence()
-            local targetCap = Options.IntelligenceCap.Value
-            if currentInt >= targetCap then
-                Logger("Cannot start: Intelligence already at or above cap! (" .. currentInt .. " >= " .. targetCap .. ")")
-                Toggles.AutoIntelligence:SetValue(false)
-                return
-            end
-            enableIntelligenceFarm()
-        else
-            disableIntelligenceFarm()
-        end
-    end
-})
-
-IntelligenceGroupBox:AddLabel('Auto Intelligence Keybind'):AddKeyPicker('AutoIntelligenceKeybind', {
-    Default = '',
-    SyncToggleState = true,
-    Mode = 'Toggle',
-    Text = 'Toggle Auto Intelligence',
-    NoUI = false,
-})
-
-Options.AutoIntelligenceKeybind:OnClick(function()
-    Toggles.AutoIntelligence:SetValue(not Toggles.AutoIntelligence.Value)
-end)
-
-IntelligenceGroupBox:AddSlider('IntelligenceCap', {
-    Text = 'Intelligence Cap',
-    Default = 50,
-    Min = 1,
-    Max = 100,
-    Rounding = 0,
-    Compact = false,
-    Tooltip = 'Stop farming when Intelligence reaches this value (1-100)'
-})
-
-IntelligenceGroupBox:AddDivider()
-local currentIntLabel = IntelligenceGroupBox:AddLabel('Current Intelligence: 0')
-
-task.spawn(function()
-    while true do
-        task.wait(1)
-        local currentInt = getCurrentIntelligence()
-        currentIntLabel:SetText('Current Intelligence: ' .. currentInt)
-    end
-end)
-
-Options.IntelligenceCap:OnChanged(function()
-    local currentInt = getCurrentIntelligence()
-    local targetCap = Options.IntelligenceCap.Value
-    Logger("Intelligence cap set to: " .. targetCap .. " (Current: " .. currentInt .. ")")
-    
-    if Toggles.AutoIntelligence and Toggles.AutoIntelligence.Value then
-        if currentInt >= targetCap then
-            Logger("Intelligence cap lowered below current value, stopping farm.")
-            Toggles.AutoIntelligence:SetValue(false)
-        end
-    end
-end)
-
--- ============ FARM SECTION - CHARISMA FARMING ============
-CharismaGroupBox:AddToggle('AutoCharisma', {
-    Text = 'Auto Charisma Farm',
-    Default = false,
-    Tooltip = 'Automatically completes charisma tasks using "How to Make Friends" book. Stops when reaching the cap value.',
-    Callback = function(Value)
-        if Value then
-            local currentChar = getCurrentCharisma()
-            local targetCap = Options.CharismaCap.Value
-            if currentChar >= targetCap then
-                Logger("Cannot start: Charisma already at or above cap! (" .. currentChar .. " >= " .. targetCap .. ")")
-                Toggles.AutoCharisma:SetValue(false)
-                return
-            end
-            enableCharismaFarm()
-        else
-            disableCharismaFarm()
-        end
-    end
-})
-
-CharismaGroupBox:AddLabel('Auto Charisma Keybind'):AddKeyPicker('AutoCharismaKeybind', {
-    Default = '',
-    SyncToggleState = true,
-    Mode = 'Toggle',
-    Text = 'Toggle Auto Charisma',
-    NoUI = false,
-})
-
-Options.AutoCharismaKeybind:OnClick(function()
-    Toggles.AutoCharisma:SetValue(not Toggles.AutoCharisma.Value)
-end)
-
-CharismaGroupBox:AddSlider('CharismaCap', {
-    Text = 'Charisma Cap',
-    Default = 50,
-    Min = 1,
-    Max = 100,
-    Rounding = 0,
-    Compact = false,
-    Tooltip = 'Stop farming when Charisma reaches this value (1-100)'
-})
-
-CharismaGroupBox:AddDivider()
-local currentCharLabel = CharismaGroupBox:AddLabel('Current Charisma: 0')
-
-task.spawn(function()
-    while true do
-        task.wait(1)
-        local currentChar = getCurrentCharisma()
-        currentCharLabel:SetText('Current Charisma: ' .. currentChar)
-    end
-end)
-
-Options.CharismaCap:OnChanged(function()
-    local currentChar = getCurrentCharisma()
-    local targetCap = Options.CharismaCap.Value
-    Logger("Charisma cap set to: " .. targetCap .. " (Current: " .. currentChar .. ")")
-    
-    if Toggles.AutoCharisma and Toggles.AutoCharisma.Value then
-        if currentChar >= targetCap then
-            Logger("Charisma cap lowered below current value, stopping farm.")
-            Toggles.AutoCharisma:SetValue(false)
-        end
-    end
 end)
 
 -- ============ VISUALS SECTION ============
@@ -2155,6 +1421,7 @@ Options.FullbrightKeybind:OnClick(function()
     Toggles.FullbrightToggle:SetValue(not Toggles.FullbrightToggle.Value)
 end)
 
+-- FFlags Button
 VisualsGroupBox:AddButton('FFlags', function()
     if fflagsActive then
         disableFFlags()
@@ -2375,7 +1642,6 @@ RunService.RenderStepped:Connect(function()
     updateAllESP()
 end)
 
--- Character added/removed handlers
 LP.CharacterAdded:Connect(function()
     task.wait(1)
     if Toggles.FlyToggle.Value then startFly() end
@@ -2400,16 +1666,6 @@ LP.AncestryChanged:Connect(function()
         easternTeleportConnection = nil
     end
     isTeleportingToEastern = false
-    -- Disable farms on character death
-    if Toggles.AutoIntelligence and Toggles.AutoIntelligence.Value then
-        Toggles.AutoIntelligence:SetValue(false)
-    end
-    if Toggles.AutoCharisma and Toggles.AutoCharisma.Value then
-        Toggles.AutoCharisma:SetValue(false)
-    end
-    if Toggles.AutoFish and Toggles.AutoFish.Value then
-        Toggles.AutoFish:SetValue(false)
-    end
 end)
 
 -- UI Settings
@@ -2421,9 +1677,6 @@ MenuGroup:AddButton('Unload', function()
     disableAgilitySpoofer()
     disableNoclip()
     stopFly()
-    disableIntelligenceFarm()
-    disableCharismaFarm()
-    disableFishFarm()
     if Toggles.FullbrightToggle and Toggles.FullbrightToggle.Value then
         disableFullbright()
     end
@@ -2488,7 +1741,8 @@ Library.ToggleKeybind = Options.MenuKeybind
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({})
+-- FIXED: Removed keybinds from ignore list so they save properly
+SaveManager:SetIgnoreIndexes({}) -- Empty table = save everything
 ThemeManager:SetFolder('MeowHub')
 SaveManager:SetFolder('MeowHub/config')
 SaveManager:BuildConfigSection(Tabs['UI Settings'])
