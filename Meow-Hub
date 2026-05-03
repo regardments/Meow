@@ -77956,7 +77956,7 @@ function GameTab.initInfoSpoofingSection(groupbox)
 
 	isDepBox:AddInput("SpoofedDateString", {
 		Text = "Spoofed Date String",
-		Default = "Linoria, 1970 CE",
+		Default = "Peru, 1970 CE",
 		Finished = true,
 		Callback = Spoofing.sds,
 	})
